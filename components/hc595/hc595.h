@@ -18,12 +18,12 @@ typedef struct {
     } flags;
 } hc595_dev_t;
 
-esp_err_t hc595_init(hc595_dev_t *conf);
-void hc595_write_byte(hc595_dev_t *conf, unsigned char data);
-void hc595_write_bytes(hc595_dev_t *conf, unsigned char *data, int data_len);
-void hc595_reset_shift_reg(hc595_dev_t *conf);
-void hc595_reset_storage_reg(hc595_dev_t *conf);
-void hc595_enable_output(hc595_dev_t *conf, bool flag);
+void hc595_init(hc595_dev_t *dev);
+void hc595_write_byte(hc595_dev_t *dev, unsigned char data);
+void hc595_write_bytes(hc595_dev_t *dev, unsigned char *data, int data_len);
+void hc595_reset_shift_reg(hc595_dev_t *dev);
+void hc595_reset_storage_reg(hc595_dev_t *dev);
+void hc595_enable_output(hc595_dev_t *dev, int flag);
 
 #ifdef __cplusplus
 }

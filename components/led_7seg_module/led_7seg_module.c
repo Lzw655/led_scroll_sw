@@ -1,5 +1,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -21,6 +22,7 @@ static unsigned char display_array[4][2] = {
     {0xBF, 0x04},
     {0xBF, 0x08},
 };
+static SemaphoreHandle_t sem_display_array;
 
 static void display_task(void *args);
 
@@ -34,17 +36,22 @@ void led_7seg_module_init(void)
     hc595_dev.flags.output_remain_en = 1;
     hc595_init(&hc595_dev);
 
+    sem_display_array = xSemaphoreCreateMutex();
+    xSemaphoreGive(sem_display_array);
     xTaskCreate(display_task, "led_7seg_module task", 2048, NULL, tskIDLE_PRIORITY + 1, NULL);
 }
 
 void led_7seg_module_set_display_int(int num)
 {
     unsigned char temp;
+
+    xSemaphoreTake(sem_display_array, portMAX_DELAY);
     for (int i = 0; i < 4; i++) {
         temp = num % 10;
         display_array[i][0] = display_char[temp];
         num /= 10;
     }
+    xSemaphoreGive(sem_display_array);
 }
 
 static void display_task(void *params)
@@ -56,7 +63,9 @@ static void display_task(void *params)
         tick = xTaskGetTickCount();
         // Refresh All bits
         for (int i = 0; i < 4; i++) {
+            xSemaphoreTake(sem_display_array, portMAX_DELAY);
             hc595_write_bytes(&hc595_dev, display_array[i], 2);
+            xSemaphoreGive(sem_display_array);
             xTaskDelayUntil(&tick, pdMS_TO_TICKS(DISPLAY_PERIOD));
         }
     }

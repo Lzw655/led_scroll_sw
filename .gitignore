@@ -100,3 +100,7 @@ managed_components
 
 # pytest log
 pytest_embedded_log/
+
+# others
+sdkconfig
+sdkconfig.old

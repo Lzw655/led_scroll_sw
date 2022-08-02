@@ -1,69 +1,95 @@
+#include <stdlib.h>
+#include "driver/pulse_cnt.h"
 #include "driver/gpio.h"
+#include "esp_log.h"
 #include "rotary_encoder.h"
 
-static void IRAM_ATTR a_isr_handler(void* arg);
-static void IRAM_ATTR b_isr_handler(void* arg);
-static void IRAM_ATTR sw_isr_handler(void* arg);
+static bool pcnt_on_reach(pcnt_unit_handle_t unit, const pcnt_watch_event_data_t *edata, void *user_ctx);
+static void sw_isr_handler(void* arg);
 
 void rotary_encoder_init(rotary_encoder_dev_t *dev)
 {
-    uint64_t gpio_pin_mask = 0;
-    /* Init necessary gpio */
-    gpio_pin_mask = (1ULL << (dev->a_gpio_num)) | (1ULL << (dev->b_gpio_num));
-    gpio_config_t io_conf = {};
-    io_conf.intr_type = GPIO_INTR_ANYEDGE;
-    io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pin_bit_mask = gpio_pin_mask;
-    io_conf.pull_down_en = 1;
-    io_conf.pull_up_en = 0;
-    ESP_ERROR_CHECK(gpio_config(&io_conf));
+    // Create pcnt unit
+    pcnt_unit_handle_t unit;
+    pcnt_unit_config_t unit_conf = {
+        .high_limit = dev->counter.limit_max,
+        .low_limit = dev->counter.limit_min,
+    };
+    ESP_ERROR_CHECK(pcnt_new_unit(&unit_conf, &unit));
+    // Set glitch filter
+    pcnt_glitch_filter_config_t glitch_conf = {
+        .max_glitch_ns = dev->counter.filter_ns,
+    };
+    ESP_ERROR_CHECK(pcnt_unit_set_glitch_filter(unit, &glitch_conf));
+    // Add channel 1 unit
+    pcnt_channel_handle_t channel_1;
+    pcnt_chan_config_t channel_conf_1 = {
+        .edge_gpio_num = dev->a_gpio_num,
+        .level_gpio_num = dev->b_gpio_num,
+    };
+    ESP_ERROR_CHECK(pcnt_new_channel(unit, &channel_conf_1, &channel_1));
+    ESP_ERROR_CHECK(pcnt_channel_set_edge_action(
+        channel_1, PCNT_CHANNEL_EDGE_ACTION_DECREASE, PCNT_CHANNEL_EDGE_ACTION_INCREASE
+    ));
+    ESP_ERROR_CHECK(pcnt_channel_set_level_action(
+        channel_1, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE
+    ));
+    // Add channel 2 in unit
+    pcnt_channel_handle_t channel_2;
+    pcnt_chan_config_t channel_conf_2 = {
+        .edge_gpio_num = dev->b_gpio_num,
+        .level_gpio_num = dev->a_gpio_num,
+    };
+    ESP_ERROR_CHECK(pcnt_new_channel(unit, &channel_conf_2, &channel_2));
+    ESP_ERROR_CHECK(pcnt_channel_set_edge_action(
+        channel_2, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_DECREASE
+    ));
+    ESP_ERROR_CHECK(pcnt_channel_set_level_action(
+        channel_2, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE
+    ));
+    // Modify IO to pull down
+    gpio_set_pull_mode(dev->a_gpio_num, GPIO_PULLDOWN_ONLY);
+    gpio_set_pull_mode(dev->b_gpio_num, GPIO_PULLDOWN_ONLY);
+    // Add watch points and register callback
+    ESP_ERROR_CHECK(pcnt_unit_add_watch_point(unit, dev->counter.watch_pint));
+    ESP_ERROR_CHECK(pcnt_unit_add_watch_point(unit, -(dev->counter.watch_pint)));
+    QueueHandle_t queue = xQueueCreate(dev->queue_size, sizeof(int));
+    assert(queue);
+    pcnt_event_callbacks_t cbs = {
+        .on_reach = pcnt_on_reach,
+    };
+    ESP_ERROR_CHECK(pcnt_unit_register_event_callbacks(unit, &cbs, queue));
+    dev->queue = queue;
+    // Enable pcnt unit
+    ESP_ERROR_CHECK(pcnt_unit_enable(unit));
+    ESP_ERROR_CHECK(pcnt_unit_clear_count(unit));
+    ESP_ERROR_CHECK(pcnt_unit_start(unit));
 
-    /* Init unnecessary gpio */
+    /* Init switch gpio */
     if (dev->sw_gpio_num != -1) {
-        gpio_pin_mask = (1 << dev->sw_gpio_num);
+        gpio_config_t io_conf = {};
         io_conf.intr_type = GPIO_INTR_NEGEDGE;
+        io_conf.mode = GPIO_MODE_INPUT;
+        io_conf.pin_bit_mask = 1ULL << (dev->sw_gpio_num);
         io_conf.pull_down_en = 0;
         io_conf.pull_up_en = 1;
-        io_conf.pin_bit_mask = gpio_pin_mask;
         ESP_ERROR_CHECK(gpio_config(&io_conf));
-    }
-
-    // Install gpio isr service
-    gpio_install_isr_service(0);
-    // Hook isr handler for specific gpio pin
-    gpio_isr_handler_add(dev->a_gpio_num, a_isr_handler, (void*)dev);
-    gpio_isr_handler_add(dev->b_gpio_num, b_isr_handler, (void*)dev);
-    gpio_isr_handler_add(dev->sw_gpio_num, sw_isr_handler, (void*)dev);
-}
-
-void rotary_encoder_count_register(rotary_encoder_dev_t *dev, int *count)
-{
-    dev->count = count;
-}
-
-static void IRAM_ATTR a_isr_handler(void* arg)
-{
-    rotary_encoder_dev_t *dev = (rotary_encoder_dev_t *)arg;
-    int a_level = gpio_get_level(dev->a_gpio_num);
-    int b_level = gpio_get_level(dev->b_gpio_num);
-
-    if (dev->count && (a_level && (!b_level)) || ((!a_level) && b_level)) {
-        (*(dev->count))++;
+        ESP_ERROR_CHECK(gpio_install_isr_service(0));
+        ESP_ERROR_CHECK(gpio_isr_handler_add(dev->sw_gpio_num, sw_isr_handler, dev));
     }
 }
 
-static void IRAM_ATTR b_isr_handler(void* arg)
+static bool pcnt_on_reach(pcnt_unit_handle_t unit, const pcnt_watch_event_data_t *edata, void *user_ctx)
 {
-    rotary_encoder_dev_t *dev = (rotary_encoder_dev_t *)arg;
-    int a_level = gpio_get_level(dev->a_gpio_num);
-    int b_level = gpio_get_level(dev->b_gpio_num);
+    BaseType_t high_task_wakeup;
+    QueueHandle_t queue = (QueueHandle_t)user_ctx;
+    xQueueSendFromISR(queue, &(edata->watch_point_value), &high_task_wakeup);
+    pcnt_unit_clear_count(unit);
 
-    if (dev->count && (a_level && (!b_level)) || ((!a_level) && b_level)) {
-        (*(dev->count))--;
-    }
+    return (high_task_wakeup == pdTRUE);
 }
 
-static void IRAM_ATTR sw_isr_handler(void* arg)
+static void sw_isr_handler(void* arg)
 {
     rotary_encoder_dev_t *dev = (rotary_encoder_dev_t *)arg;
     if (dev->sw_callback) {

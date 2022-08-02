@@ -4,6 +4,5 @@ idf_component_register(
     INCLUDE_DIRS
         "."
     REQUIRES
-        "hc595"
-        "esp_timer"
+        "driver"
 )

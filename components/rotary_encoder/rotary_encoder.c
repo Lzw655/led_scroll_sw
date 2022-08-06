@@ -47,9 +47,6 @@ void rotary_encoder_init(rotary_encoder_dev_t *dev)
     ESP_ERROR_CHECK(pcnt_channel_set_level_action(
         channel_2, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE
     ));
-    // Modify IO to pull down
-    gpio_set_pull_mode(dev->a_gpio_num, GPIO_PULLDOWN_ONLY);
-    gpio_set_pull_mode(dev->b_gpio_num, GPIO_PULLDOWN_ONLY);
     // Add watch points and register callback
     ESP_ERROR_CHECK(pcnt_unit_add_watch_point(unit, dev->counter.watch_pint));
     ESP_ERROR_CHECK(pcnt_unit_add_watch_point(unit, -(dev->counter.watch_pint)));

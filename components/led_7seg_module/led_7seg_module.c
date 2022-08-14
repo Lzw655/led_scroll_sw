@@ -7,7 +7,11 @@
 #include "hc595.h"
 #include "led_7seg_module.h"
 
-#define DISPLAY_PERIOD          2       // ms
+#define DISPLAY_PERIOD          (2)       // ms
+
+#define DATA_IN_GPIO            (33)
+#define SCLK_GPIO               (25)
+#define RCLK_GPIO               (26)
 
 static char *TAG = "led_7seg_module";
 static hc595_dev_t hc595_dev = {0};
@@ -22,22 +26,22 @@ static unsigned char display_array[4][2] = {
     {0xBF, 0x04},
     {0xBF, 0x08},
 };
-static SemaphoreHandle_t sem_display_array;
+static SemaphoreHandle_t sem_dev_lock;
 
 static void display_task(void *args);
 
 void led_7seg_module_init(void)
 {
-    hc595_dev.data_in_gpio_num = 32;
-    hc595_dev.shift_clk_gpio_num = 25;
-    hc595_dev.storage_clk_gpio_num = 26;
+    hc595_dev.data_in_gpio_num = DATA_IN_GPIO;
+    hc595_dev.shift_clk_gpio_num = SCLK_GPIO;
+    hc595_dev.storage_clk_gpio_num = RCLK_GPIO;
     hc595_dev.ouput_en_gpio_num = -1;
     hc595_dev.reset_gpio_num = -1;
     hc595_dev.flags.output_remain_en = 1;
     hc595_init(&hc595_dev);
 
-    sem_display_array = xSemaphoreCreateMutex();
-    xSemaphoreGive(sem_display_array);
+    sem_dev_lock = xSemaphoreCreateMutex();
+    xSemaphoreGive(sem_dev_lock);
     xTaskCreate(display_task, "led_7seg_module task", 2048, NULL, tskIDLE_PRIORITY + 1, NULL);
 }
 
@@ -45,13 +49,13 @@ void led_7seg_module_set_display_int(int num)
 {
     unsigned char temp;
 
-    xSemaphoreTake(sem_display_array, portMAX_DELAY);
+    xSemaphoreTake(sem_dev_lock, portMAX_DELAY);
     for (int i = 0; i < 4; i++) {
         temp = num % 10;
         display_array[i][0] = display_char[temp];
         num /= 10;
     }
-    xSemaphoreGive(sem_display_array);
+    xSemaphoreGive(sem_dev_lock);
 }
 
 static void display_task(void *params)
@@ -63,9 +67,9 @@ static void display_task(void *params)
         tick = xTaskGetTickCount();
         // Refresh All bits
         for (int i = 0; i < 4; i++) {
-            xSemaphoreTake(sem_display_array, portMAX_DELAY);
+            xSemaphoreTake(sem_dev_lock, portMAX_DELAY);
             hc595_write_bytes(&hc595_dev, display_array[i], 2);
-            xSemaphoreGive(sem_display_array);
+            xSemaphoreGive(sem_dev_lock);
             xTaskDelayUntil(&tick, pdMS_TO_TICKS(DISPLAY_PERIOD));
         }
     }

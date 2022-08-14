@@ -6,6 +6,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "led_7seg_module.h"
+#include "led_scroller.h"
 #include "rotary_encoder.h"
 
 static void sw_on_push(void *arg);
@@ -30,6 +31,10 @@ void app_main(void)
     ESP_LOGI(TAG, "Init led_7seg_module");
     led_7seg_module_init();
     led_7seg_module_set_display_int(1234);
+
+    ESP_LOGI(TAG, "Init led_scroller");
+    led_scroller_init();
+    led_scroller_set(0x3, 0x33, 1);
 
     rotary_encoder_init(&rotary_encoder_dev);
 

@@ -34,15 +34,25 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Init led_scroller");
     led_scroller_init();
-    led_scroller_set(0x3, 0x33, 1);
+    // led_scroller_set(0x3, 0x33, 1);
 
     rotary_encoder_init(&rotary_encoder_dev);
 
     QueueHandle_t queue = rotary_encoder_dev.queue;
-    int count;
+    // int count;
+    int last_i = 0, last_j = 0;
     for (;;) {
-        if (xQueueReceive(queue, &count, portMAX_DELAY)) {
-            ESP_LOGI(TAG, "count: %d", count);
+        // if (xQueueReceive(queue, &count, portMAX_DELAY)) {
+        //     ESP_LOGI(TAG, "count: %d", count);
+        // }
+        for (int i = 0; i < 10; i++) {
+            for (int j = 0; j < 10; j++) {
+                led_scroller_set(1ULL << last_i, 1ULL << last_j, 0);
+                led_scroller_set(1ULL << i, 1ULL << j, 1);
+                last_i = i;
+                last_j = j;
+                vTaskDelay(pdMS_TO_TICKS(100));
+            }
         }
     }
 }

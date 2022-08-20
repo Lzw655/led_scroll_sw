@@ -5,20 +5,38 @@
 #include "freertos/queue.h"
 #include "esp_err.h"
 #include "esp_log.h"
-#include "led_7seg_module.h"
+#include "led_7seg.h"
 #include "led_scroller.h"
 #include "rotary_encoder.h"
 
-static void sw_on_push(void *arg);
+#define DISPLAY_PERIOD          (2)       // ms
+
+#define DATA_IN_GPIO            (33)
+#define SCLK_GPIO               (25)
+#define RCLK_GPIO               (26)
+
+static void sw_on_push(void);
+static void led_module_refresh_task(led_7seg_handle_t handle);
 
 static char *TAG = "app_main";
 void app_main(void)
 {
     ESP_LOGI(TAG, "hello world");
 
-    ESP_LOGI(TAG, "Init led_7seg_module");
-    led_7seg_module_init();
-    led_7seg_module_set_display_int(1234);
+    ESP_LOGI(TAG, "Init led_7seg");
+    led_7seg_handle_t module_handle;
+    led_7seg_config_t module_config = {
+        .bits_num = 4,
+        .din_gpio_num = 33,
+        .sclk_gpio_num = 25,
+        .rclk_gpio_num = 26,
+        .refresh_period_per_bit = 2,
+        .blink_en = true,
+        .blink_period = 1000,
+    };
+    led_7seg_init(&module_config, &module_handle);
+    led_7seg_set_display_int(1234, module_handle);
+    led_7seg_blink(0x01, true, module_handle);
 
     ESP_LOGI(TAG, "Init led_scroller");
     led_scroller_init();
@@ -57,7 +75,7 @@ void app_main(void)
     }
 }
 
-static void sw_on_push(void *arg)
+static void sw_on_push(void)
 {
     ESP_DRAM_LOGI(TAG, "swtich push");
 }

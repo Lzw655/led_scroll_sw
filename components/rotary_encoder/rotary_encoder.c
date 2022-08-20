@@ -4,8 +4,11 @@
 #include "esp_log.h"
 #include "rotary_encoder.h"
 
+static char *TAG = "rotary_encoder";
+
 static bool pcnt_on_reach(pcnt_unit_handle_t unit, const pcnt_watch_event_data_t *edata, void *user_ctx);
 static void sw_isr_handler(void* arg);
+static void sw_filter_timer_cb(TimerHandle_t xTimer);
 
 void rotary_encoder_init(rotary_encoder_dev_t *dev)
 {
@@ -73,6 +76,10 @@ void rotary_encoder_init(rotary_encoder_dev_t *dev)
         ESP_ERROR_CHECK(gpio_config(&io_conf));
         ESP_ERROR_CHECK(gpio_install_isr_service(0));
         ESP_ERROR_CHECK(gpio_isr_handler_add(dev->sw_gpio_num, sw_isr_handler, dev));
+
+        dev->sw_filter_timer = xTimerCreate(
+            "", pdMS_TO_TICKS(dev->sw_filter_ms), pdFALSE, (void *)dev, sw_filter_timer_cb
+        );
     }
 }
 
@@ -89,7 +96,25 @@ static bool pcnt_on_reach(pcnt_unit_handle_t unit, const pcnt_watch_event_data_t
 static void sw_isr_handler(void* arg)
 {
     rotary_encoder_dev_t *dev = (rotary_encoder_dev_t *)arg;
-    if (dev->sw_callback) {
+    BaseType_t task_woken = pdFALSE;
+
+    if (!xTimerIsTimerActive(dev->sw_filter_timer)) {
+        xTimerStartFromISR(dev->sw_filter_timer, &task_woken);
+    }
+    else {
+        xTimerResetFromISR(dev->sw_filter_timer, &task_woken);
+    }
+
+    if (task_woken) {
+        portYIELD_FROM_ISR();
+    }
+}
+
+static void sw_filter_timer_cb(TimerHandle_t xTimer)
+{
+    rotary_encoder_dev_t *dev = (rotary_encoder_dev_t *)pvTimerGetTimerID(xTimer);
+
+    if (!gpio_get_level(dev->sw_gpio_num) && dev->sw_callback) {
         dev->sw_callback();
     }
 }

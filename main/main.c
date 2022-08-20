@@ -69,7 +69,7 @@ void app_main(void)
                 led_scroller_set(1ULL << i, 1ULL << j, 1);
                 last_i = i;
                 last_j = j;
-                vTaskDelay(pdMS_TO_TICKS(100));
+                vTaskDelay(pdMS_TO_TICKS(1));
             }
         }
     }

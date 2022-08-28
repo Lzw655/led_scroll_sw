@@ -40,6 +40,7 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Init led_scroller");
     led_scroller_init();
+    led_scroller_run(true, 5, 10);
 
     ESP_LOGI(TAG, "Init rotary_encoder");
     rotary_encoder_handle_t encoder_handle;
@@ -54,19 +55,6 @@ void app_main(void)
         .on_sw_press = on_sw_cb,
     };
     rotary_encoder_create(&encoder_cfg, &encoder_handle);
-
-    int last_i = 0, last_j = 0;
-    for (;;) {
-        for (int i = 0; i < 10; i++) {
-            for (int j = 0; j < 10; j++) {
-                led_scroller_set(1ULL << last_i, 1ULL << last_j, 0);
-                led_scroller_set(1ULL << i, 1ULL << j, 1);
-                last_i = i;
-                last_j = j;
-                vTaskDelay(pdMS_TO_TICKS(1));
-            }
-        }
-    }
 }
 
 static void on_encoder_act_cb(rotary_encoder_handle_t handle, int count, int period_ms)

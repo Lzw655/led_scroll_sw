@@ -1,40 +1,35 @@
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
+#include "driver/gpio.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "hc595.h"
 #include "led_scroller.h"
 
-#define DISPLAY_PERIOD          (200)       // us
-#define DISPLAY_COUNT           (10)
+#define DISPLAY_PERIOD          (50)       // us
+#define DISPLAY_LED_SIGS        (10)
+#define DISPLAY_LED_DATS        (10)
 
 #define DATA_IN_GPIO            (5)
 #define SCLK_GPIO               (17)
 #define RCLK_GPIO               (16)
 
-typedef struct {
-    unsigned short L1: 1;
-    unsigned short L2: 1;
-    unsigned short L3: 1;
-    unsigned short L4: 1;
-    unsigned short L5: 1;
-    unsigned short L6: 1;
-    unsigned short L7: 1;
-    unsigned short L8: 1;
-    unsigned short L9: 1;
-    unsigned short L10: 1;
-    unsigned short unused: 6;
-} array_element_t;
-
 static char *TAG = "led_scroller";
 static hc595_dev_t hc595_dev = {0};
-static array_element_t display_array[DISPLAY_COUNT] = {0};
 static TaskHandle_t task_handle;
-static SemaphoreHandle_t sem_dev_lock;
+static int led_nums_max;
+static bool scroll_flag = false;
+static int scroll_count;
+static int scroll_sig_index, scroll_dat_index;
+static int scroll_period;
+static int gpio_level = 0;
 
-static void timer_cb(void *args);
+static void refresh_timer_cb(void *args);
+static void update_time(void);
+static void scroll(uint16_t sig[], uint16_t val[]);
 static void refresh_task(void *args);
 
 void led_scroller_init(void)
@@ -47,65 +42,116 @@ void led_scroller_init(void)
     hc595_dev.flags.output_remain_en = 1;
     hc595_init(&hc595_dev);
 
-    sem_dev_lock = xSemaphoreCreateMutex();
-    esp_timer_handle_t timer_handle;
+    esp_timer_handle_t refresh_timer_handle;
     esp_timer_create_args_t timer_args = {
-        .name = "led_scroller_refresh",
-        .callback = timer_cb,
+        .name = "",
+        .callback = refresh_timer_cb,
     };
-    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer_handle));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle, DISPLAY_PERIOD));
-    // xSemaphoreGive(sem_dev_lock);
-    xTaskCreate(refresh_task, "led_scroller task", 2048, NULL, configMAX_PRIORITIES, &task_handle);
+    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &refresh_timer_handle));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(refresh_timer_handle, DISPLAY_PERIOD));
+
+    xTaskCreate(refresh_task, "led_scroller", 2048, NULL, configMAX_PRIORITIES, &task_handle);
+
+    gpio_set_direction(32, GPIO_MODE_OUTPUT);
+    gpio_set_level(32, gpio_level);
 }
 
-void led_scroller_set(unsigned short sigs, unsigned short bits, int flag)
+void led_scroller_run(bool flag, uint8_t led_nums, int freq)
 {
-    unsigned short *data;
-    xSemaphoreTake(sem_dev_lock, portMAX_DELAY);
-    for (int i = 0; i < DISPLAY_COUNT; i++, sigs >>= 1) {
-        if ((sigs & 0x1) == 0) {
-            continue;
-        }
-        data = (unsigned short *)&display_array[i];
-        if (flag) {
-            *data |= bits;
-        }
-        else {
-            *data &= ~bits;
-        }
+    uint8_t data[3];
+    if (!scroll_flag && flag) {
+        led_nums_max = led_nums;
+        scroll_period = (1000 * 1000) / (freq * DISPLAY_PERIOD);
+        scroll_count = 1;
+        scroll_sig_index = scroll_dat_index = 1;
+        data[0] = (0xfffe) >> 6;
+        data[1] = ((0x1) >> 8) | (((0xfffe) << 2) & 0xff);
+        data[2] = (0x1);
+        hc595_write_bytes(&hc595_dev, data, 3);
     }
-    xSemaphoreGive(sem_dev_lock);
+    scroll_flag = flag;
 }
 
-static void timer_cb(void *args)
+static void refresh_timer_cb(void *args)
 {
     BaseType_t res;
     xTaskNotifyFromISR(task_handle, 0, eNoAction, &res);
+    update_time();
     portYIELD_FROM_ISR(res);
 }
 
 static void refresh_task(void *params)
 {
-    TickType_t tick;
-    unsigned char data[3];
-    unsigned short sig;
-    array_element_t element;
+    uint8_t data[3];
+    uint16_t sig[2];
+    uint16_t value[2];
+    uint8_t i;
 
     ESP_LOGI(TAG, "refresh_task begin");
     for (;;) {
-        // Refresh All bits
-        for (int i = 0; i < DISPLAY_COUNT; i++) {
-            xTaskNotifyWait(0, ULONG_MAX, NULL, portMAX_DELAY);
-            xSemaphoreTake(sem_dev_lock, portMAX_DELAY);
-            sig = 1ULL << i;
-            *(unsigned short *)&element = ~(*(unsigned short *)(display_array + i));
-            data[0] = (element.L7 << 0) | (element.L8 << 1) | (element.L9 << 2) | (element.L10 << 3);
-            data[1] = (((sig >> 8) & 0x1) << 0) | (((sig >> 9) & 0x1) << 1) | (element.L1 << 2) | (element.L2 << 3) |
-                      (element.L3 << 4) | (element.L4 << 5) | (element.L5 << 6) | (element.L6 << 7);
-            data[2] = sig & 0xff;
-            hc595_write_bytes(&hc595_dev, data, 3);
-            xSemaphoreGive(sem_dev_lock);
+        if (scroll_flag) {
+            scroll(sig, value);
+            for (i = 0; i < 2; i++) {
+                xTaskNotifyWait(0, ULONG_MAX, NULL, portMAX_DELAY);
+                data[0] = value[i] >> 6;
+                data[1] = (sig[i] >> 8) | ((value[i] << 2) & 0xff);
+                data[2] = sig[i];
+                hc595_write_bytes(&hc595_dev, data, 3);
+                // gpio_level = !gpio_level;
+                // gpio_set_level(32, gpio_level);
+            }
+        }
+        else {
+            vTaskDelay(pdMS_TO_TICKS(100));
         }
     }
+}
+
+static void update_time(void)
+{
+    if (scroll_count < scroll_period) {
+        scroll_count++;
+    }
+    else {
+        scroll_count = 1;
+        if (scroll_dat_index < DISPLAY_LED_DATS) {
+            scroll_dat_index++;
+        }
+        else {
+            scroll_dat_index = 1;
+            if (scroll_sig_index < DISPLAY_LED_SIGS + 1) {
+                scroll_sig_index++;
+            }
+            else {
+                scroll_sig_index = 1;
+            }
+        }
+    }
+}
+
+static void scroll(uint16_t sig[], uint16_t val[])
+{
+    uint8_t i;
+    uint16_t sig_temp[2] = {0}, val_temp[2] = {0xffff, 0xffff};
+
+    if ((scroll_dat_index <= led_nums_max) &&
+        (scroll_sig_index > 1 || scroll_sig_index < DISPLAY_LED_SIGS + 1)) {
+        sig_temp[1] = 1ULL << (scroll_sig_index - 2);
+        for (i = 1; i < led_nums_max - scroll_dat_index + 1; i++) {
+            val_temp[1] &= ~(1ULL << (DISPLAY_LED_DATS - i));
+        }
+    }
+    else {
+        sig_temp[1] = 1ULL << DISPLAY_LED_SIGS;
+    }
+
+    sig_temp[0] = 1ULL << (scroll_sig_index - 1);
+    for (i = scroll_dat_index; (i > scroll_dat_index - led_nums_max) && (i > 0); i--) {
+            val_temp[0] &= ~(1ULL << (i - 1));
+    }
+
+    sig[0] = sig_temp[0];
+    val[0] = val_temp[0];
+    sig[1] = sig_temp[1];
+    val[1] = val_temp[1];
 }

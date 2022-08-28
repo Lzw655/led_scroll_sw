@@ -118,7 +118,7 @@ void hc595_enable_output(hc595_dev_t *dev, int flag)
 
 static void hc595_shift_clk_once(hc595_dev_t *dev)
 {
-    esp_rom_delay_us(1);
+    // esp_rom_delay_us(1);
     gpio_set_level(dev->shift_clk_gpio_num, 1);
     esp_rom_delay_us(1);
     gpio_set_level(dev->shift_clk_gpio_num, 0);
@@ -126,7 +126,7 @@ static void hc595_shift_clk_once(hc595_dev_t *dev)
 
 static void hc595_storage_clk_once(hc595_dev_t *dev)
 {
-    esp_rom_delay_us(1);
+    // esp_rom_delay_us(1);
     gpio_set_level(dev->storage_clk_gpio_num, 1);
     esp_rom_delay_us(1);
     gpio_set_level(dev->storage_clk_gpio_num, 0);

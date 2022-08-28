@@ -15,8 +15,8 @@
 #define SCLK_GPIO               (25)
 #define RCLK_GPIO               (26)
 
-static void sw_on_push(void);
-static void led_module_refresh_task(led_7seg_handle_t handle);
+static void on_encoder_act_cb(rotary_encoder_handle_t handle, int count, int period_ms);
+static void on_sw_cb(rotary_encoder_handle_t handle);
 
 static char *TAG = "app_main";
 void app_main(void)
@@ -42,27 +42,21 @@ void app_main(void)
     led_scroller_init();
 
     ESP_LOGI(TAG, "Init rotary_encoder");
-    static rotary_encoder_dev_t rotary_encoder_dev = {
+    rotary_encoder_handle_t encoder_handle;
+    rotary_encoder_config_t encoder_cfg = {
         .a_gpio_num = 14,
         .b_gpio_num = 12,
         .sw_gpio_num = 13,
-        .counter.limit_max = 100,
-        .counter.limit_min = -100,
-        .counter.watch_pint = 2,
-        .counter.filter_ns = 1000,
-        .queue_size = 10,
+        .encoder_filter_ns = 1000,
+        .encoder_period_ms = 300,
+        .on_encoder_act = on_encoder_act_cb,
         .sw_filter_ms = 20,
-        .sw_callback = sw_on_push,
+        .on_sw_press = on_sw_cb,
     };
-    rotary_encoder_init(&rotary_encoder_dev);
+    rotary_encoder_create(&encoder_cfg, &encoder_handle);
 
-    QueueHandle_t queue = rotary_encoder_dev.queue;
-    // int count;
     int last_i = 0, last_j = 0;
     for (;;) {
-        // if (xQueueReceive(queue, &count, portMAX_DELAY)) {
-        //     ESP_LOGI(TAG, "count: %d", count);
-        // }
         for (int i = 0; i < 10; i++) {
             for (int j = 0; j < 10; j++) {
                 led_scroller_set(1ULL << last_i, 1ULL << last_j, 0);
@@ -75,7 +69,12 @@ void app_main(void)
     }
 }
 
-static void sw_on_push(void)
+static void on_encoder_act_cb(rotary_encoder_handle_t handle, int count, int period_ms)
+{
+    ESP_LOGI(TAG, "encode: %d", count);
+}
+
+static void on_sw_cb(rotary_encoder_handle_t handle)
 {
     ESP_DRAM_LOGI(TAG, "swtich push");
 }

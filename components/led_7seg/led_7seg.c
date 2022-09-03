@@ -18,6 +18,7 @@ struct led_7seg_t {
     uint8_t bits_num;
     uint8_t refresh_period_per_bit;
     uint8_t blink_bits_mask;
+    bool bink_enable;
     uint8_t refresh_bits_mask;
     uint8_t display_array[];
 };
@@ -56,6 +57,7 @@ void led_7seg_init(led_7seg_config_t *config, led_7seg_handle_t *handle)
         module->blink_timer = xTimerCreate(
             "", pdMS_TO_TICKS(config->blink.period / 2), pdTRUE, (void *)module, blink_timer_cb
         );
+        module->bink_enable = false;
     }
     *handle = module;
 
@@ -85,14 +87,14 @@ void led_7seg_blink(uint8_t bit_mask, bool en, led_7seg_handle_t handle)
         handle->blink_bits_mask &= ~bit_mask;
     }
     // Start blink
-    if (!old_mask && handle->blink_bits_mask) {
-        if (!xTimerIsTimerActive(handle->blink_timer)) {
-            xTimerStart(handle->blink_timer, portMAX_DELAY);
-        }
+    if (!old_mask && handle->blink_bits_mask && !handle->bink_enable) {
+        handle->bink_enable = true;
+        xTimerStart(handle->blink_timer, portMAX_DELAY);
     }
     // Stop blink
     else if (old_mask && !handle->blink_bits_mask) {
-        if (xTimerIsTimerActive(handle->blink_timer)) {
+        if (handle->bink_enable) {
+            handle->bink_enable = false;
             xTimerStop(handle->blink_timer, portMAX_DELAY);
         }
         handle->refresh_bits_mask = 0xff;

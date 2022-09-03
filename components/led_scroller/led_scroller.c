@@ -42,6 +42,8 @@ void led_scroller_init(void)
     hc595_dev.flags.output_remain_en = 1;
     hc595_init(&hc595_dev);
 
+    xTaskCreatePinnedToCore(refresh_task, "led_scroller", 2048, NULL, configMAX_PRIORITIES, &task_handle, 1);
+
     esp_timer_handle_t refresh_timer_handle;
     esp_timer_create_args_t timer_args = {
         .name = "",
@@ -49,8 +51,6 @@ void led_scroller_init(void)
     };
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &refresh_timer_handle));
     ESP_ERROR_CHECK(esp_timer_start_periodic(refresh_timer_handle, DISPLAY_PERIOD));
-
-    xTaskCreatePinnedToCore(refresh_task, "led_scroller", 2048, NULL, configMAX_PRIORITIES, &task_handle, 1);
 
     gpio_set_direction(32, GPIO_MODE_OUTPUT);
     gpio_set_level(32, gpio_level);

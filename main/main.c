@@ -10,6 +10,7 @@
 #include "led_7seg.h"
 #include "led_scroller.h"
 #include "rotary_encoder.h"
+#include "notify.h"
 
 #define LED_SCROLLER_FREQ           (1000)
 #define LED_SCROLLER_FREQ_MAX       (2000)
@@ -24,10 +25,12 @@ int8_t encoder_count;
 int led_scroller_freq = LED_SCROLLER_FREQ;
 bool led_7seg_encoder_enable = false;
 bool sw_flag = false;
+bool notify_flag = false;
 
 static void on_encoder_act_cb(rotary_encoder_handle_t handle, int count, int period_ms);
 static void on_sw_cb(rotary_encoder_handle_t handle);
 static void task_freq_change(void *param);
+static void on_notify_cb(void);
 
 void app_main(void)
 {
@@ -76,6 +79,7 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Init led_scroller");
     led_scroller_init();
+    led_scroller_run(true, 5, led_scroller_freq);
 
     ESP_LOGI(TAG, "Init rotary_encoder");
     rotary_encoder_config_t encoder_cfg = {
@@ -90,8 +94,10 @@ void app_main(void)
     };
     rotary_encoder_create(&encoder_cfg, &encoder_handle);
 
+    notify_init(on_notify_cb);
+
     xTaskCreatePinnedToCore(task_freq_change, "freq_change", 2048, NULL, tskIDLE_PRIORITY + 1, &task_freq_change_handle, tskNO_AFFINITY);
-    xTaskNotify(task_freq_change_handle, 0, eNoAction);
+    // xTaskNotify(task_freq_change_handle, 0, eNoAction);
 }
 
 static void on_encoder_act_cb(rotary_encoder_handle_t handle, int count, int period_ms)
@@ -119,6 +125,23 @@ static bool check_sw_state(void)
     return false;
 }
 
+static void on_notify_cb(void)
+{
+    ESP_DRAM_LOGI(TAG, "notify in");
+    notify_flag = true;
+    xTaskNotify(task_freq_change_handle, 0, eNoAction);
+}
+
+static bool check_notify_state(void)
+{
+    if (notify_flag) {
+        notify_flag = false;
+        return true;
+    }
+
+    return false;
+}
+
 static void resset_led_7seg(void)
 {
     led_7seg_encoder_enable = true;
@@ -140,8 +163,13 @@ static void task_freq_change(void *param)
 
     int8_t old_num, new_num;
     for (;;) {
+begin:
         xTaskNotifyWait(0, ULONG_MAX, NULL, portMAX_DELAY);
+        notify_out();
+        vTaskDelay(pdMS_TO_TICKS(200));
+        xTaskNotifyWait(0, ULONG_MAX, NULL, 0);
         sw_flag = false;
+        notify_flag = false;
         ESP_LOGI(TAG, "task_freq_change loop begin");
         led_scroller_run(false, 0, 0);
         resset_led_7seg();
@@ -149,9 +177,24 @@ static void task_freq_change(void *param)
             led_7seg_blink(1 << i, true, module_handle);
             while (1) {
                 xTaskNotifyWait(0, ULONG_MAX, NULL, portMAX_DELAY);
+                if (check_notify_state()) {
+                    notify_out();
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                    xTaskNotifyWait(0, ULONG_MAX, NULL, 0);
+                    led_7seg_blink(0xff, false, module_handle);
+                    led_scroller_freq = (led_scroller_freq > LED_SCROLLER_FREQ_MAX) ? LED_SCROLLER_FREQ_MAX : led_scroller_freq;
+                    led_scroller_freq = (led_scroller_freq < LED_SCROLLER_FREQ_MIN) ? LED_SCROLLER_FREQ_MIN : led_scroller_freq;
+                    write_freq_to_nvs(led_scroller_freq);
+                    led_scroller_run(true, 5, led_scroller_freq);
+                    led_7seg_set_display_int(led_scroller_freq, module_handle);
+                    goto begin;
+                }
                 if (check_sw_state()) {
                     led_7seg_blink(1 << i, false, module_handle);
                     if (i == 3) {
+                        notify_out();
+                        vTaskDelay(pdMS_TO_TICKS(200));
+                        xTaskNotifyWait(0, ULONG_MAX, NULL, 0);
                         led_scroller_freq = (led_scroller_freq > LED_SCROLLER_FREQ_MAX) ? LED_SCROLLER_FREQ_MAX : led_scroller_freq;
                         led_scroller_freq = (led_scroller_freq < LED_SCROLLER_FREQ_MIN) ? LED_SCROLLER_FREQ_MIN : led_scroller_freq;
                         write_freq_to_nvs(led_scroller_freq);

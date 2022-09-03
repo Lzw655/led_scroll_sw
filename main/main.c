@@ -6,6 +6,7 @@
 #include "freertos/queue.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "nvs_flash.h"
 #include "led_7seg.h"
 #include "led_scroller.h"
 #include "rotary_encoder.h"
@@ -20,7 +21,7 @@ led_7seg_handle_t module_handle;
 rotary_encoder_handle_t encoder_handle;
 TaskHandle_t task_freq_change_handle;
 int8_t encoder_count;
-uint16_t led_scroller_freq = LED_SCROLLER_FREQ;
+int led_scroller_freq = LED_SCROLLER_FREQ;
 bool led_7seg_encoder_enable = false;
 bool sw_flag = false;
 
@@ -31,6 +32,30 @@ static void task_freq_change(void *param);
 void app_main(void)
 {
     ESP_LOGI(TAG, "hello world");
+    // Initialize NVS
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        // NVS partition was truncated and needs to be erased
+        // Retry nvs_flash_init
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+    nvs_handle_t nvs_handle;
+    ESP_ERROR_CHECK(nvs_open("nvs", NVS_READWRITE, &nvs_handle));
+    err = nvs_get_i32(nvs_handle, "freq", &led_scroller_freq);
+    switch (err) {
+        case ESP_OK:
+            ESP_LOGI(TAG, "nvs frequency = %d\n", led_scroller_freq);
+            break;
+        case ESP_ERR_NVS_NOT_FOUND:
+            ESP_ERROR_CHECK(nvs_set_i32(nvs_handle, "freq", led_scroller_freq));
+            break;
+        default :
+            ESP_LOGI(TAG, "Error (%s) reading!\n", esp_err_to_name(err));
+    }
+    ESP_ERROR_CHECK(nvs_commit(nvs_handle));
+    nvs_close(nvs_handle);
 
     ESP_LOGI(TAG, "Init led_7seg");
     led_7seg_config_t module_config = {
@@ -100,6 +125,15 @@ static void resset_led_7seg(void)
     encoder_count = 0;
 }
 
+static void write_freq_to_nvs(int freq)
+{
+    nvs_handle_t nvs_handle;
+    ESP_ERROR_CHECK(nvs_open("nvs", NVS_READWRITE, &nvs_handle));
+    ESP_ERROR_CHECK(nvs_set_i32(nvs_handle, "freq", freq));
+    ESP_ERROR_CHECK(nvs_commit(nvs_handle));
+    nvs_close(nvs_handle);
+}
+
 static void task_freq_change(void *param)
 {
     ESP_LOGI(TAG, "task_freq_change start");
@@ -120,6 +154,7 @@ static void task_freq_change(void *param)
                     if (i == 3) {
                         led_scroller_freq = (led_scroller_freq > LED_SCROLLER_FREQ_MAX) ? LED_SCROLLER_FREQ_MAX : led_scroller_freq;
                         led_scroller_freq = (led_scroller_freq < LED_SCROLLER_FREQ_MIN) ? LED_SCROLLER_FREQ_MIN : led_scroller_freq;
+                        write_freq_to_nvs(led_scroller_freq);
                         led_scroller_run(true, 5, led_scroller_freq);
                         led_7seg_set_display_int(led_scroller_freq, module_handle);
                     }

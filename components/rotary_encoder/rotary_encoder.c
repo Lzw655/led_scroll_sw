@@ -129,7 +129,8 @@ static bool pcnt_on_reach(pcnt_unit_handle_t unit, const pcnt_watch_event_data_t
 {
     rotary_encoder_t *dev = (rotary_encoder_t *)user_ctx;
     QueueHandle_t queue = dev->queue;
-    int watch_point_value = edata->watch_point_value / 2;
+    int watch_point_value;
+    watch_point_value = edata->watch_point_value / 2;
     BaseType_t high_task_wakeup;
     xQueueSendFromISR(queue, &watch_point_value, &high_task_wakeup);
     pcnt_unit_clear_count(unit);

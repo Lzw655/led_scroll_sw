@@ -51,7 +51,6 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Init led_scroller");
     led_scroller_init();
-    led_scroller_run(true, 5, led_scroller_freq);
 
     ESP_LOGI(TAG, "Init rotary_encoder");
     rotary_encoder_config_t encoder_cfg = {
@@ -108,7 +107,9 @@ static void task_freq_change(void *param)
     int8_t old_num, new_num;
     for (;;) {
         xTaskNotifyWait(0, ULONG_MAX, NULL, portMAX_DELAY);
+        sw_flag = false;
         ESP_LOGI(TAG, "task_freq_change loop begin");
+        led_scroller_run(false, 0, 0);
         resset_led_7seg();
         for (int i = 0; i < 4; i++) {
             led_7seg_blink(1 << i, true, module_handle);
@@ -116,6 +117,12 @@ static void task_freq_change(void *param)
                 xTaskNotifyWait(0, ULONG_MAX, NULL, portMAX_DELAY);
                 if (check_sw_state()) {
                     led_7seg_blink(1 << i, false, module_handle);
+                    if (i == 3) {
+                        led_scroller_freq = (led_scroller_freq > LED_SCROLLER_FREQ_MAX) ? LED_SCROLLER_FREQ_MAX : led_scroller_freq;
+                        led_scroller_freq = (led_scroller_freq < LED_SCROLLER_FREQ_MIN) ? LED_SCROLLER_FREQ_MIN : led_scroller_freq;
+                        led_scroller_run(true, 5, led_scroller_freq);
+                        led_7seg_set_display_int(led_scroller_freq, module_handle);
+                    }
                     break;
                 }
                 old_num = (int)(led_scroller_freq / pow(10, i)) % 10;

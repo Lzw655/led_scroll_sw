@@ -48,11 +48,13 @@ void led_7seg_init(led_7seg_config_t *config, led_7seg_handle_t *handle)
     module->blink_bits_mask = 0;
     module->refresh_bits_mask = 0xff;
     module->refresh_period_per_bit = config->refresh_period_per_bit;
-    xTaskCreate(refresh_task, "refresh task", 2048, (void *)module, tskIDLE_PRIORITY + 1, NULL);
+    xTaskCreatePinnedToCore(
+        refresh_task, "led_7seg", 2048, (void *)module, config->blink.task_priority, NULL, config->blink.task_core
+    );
     module->blink_timer = NULL;
-    if (config->blink_en) {
+    if (config->blink.enable) {
         module->blink_timer = xTimerCreate(
-            "", pdMS_TO_TICKS(config->blink_period / 2), pdTRUE, (void *)module, blink_timer_cb
+            "", pdMS_TO_TICKS(config->blink.period / 2), pdTRUE, (void *)module, blink_timer_cb
         );
     }
     *handle = module;

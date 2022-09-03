@@ -15,8 +15,12 @@ typedef struct {
     int rclk_gpio_num;
     uint8_t bits_num;
     uint8_t refresh_period_per_bit;     // ms
-    bool blink_en;
-    uint16_t blink_period;
+    struct {
+        bool enable;
+        uint16_t period;
+        int task_core;
+        int task_priority;
+    } blink;
 } led_7seg_config_t;
 
 void led_7seg_init(led_7seg_config_t *config, led_7seg_handle_t *handle);

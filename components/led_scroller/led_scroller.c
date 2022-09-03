@@ -50,7 +50,7 @@ void led_scroller_init(void)
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &refresh_timer_handle));
     ESP_ERROR_CHECK(esp_timer_start_periodic(refresh_timer_handle, DISPLAY_PERIOD));
 
-    xTaskCreate(refresh_task, "led_scroller", 2048, NULL, configMAX_PRIORITIES, &task_handle);
+    xTaskCreatePinnedToCore(refresh_task, "led_scroller", 2048, NULL, configMAX_PRIORITIES, &task_handle, 1);
 
     gpio_set_direction(32, GPIO_MODE_OUTPUT);
     gpio_set_level(32, gpio_level);
